@@ -1203,6 +1203,11 @@ def create_grn(data: dict, db: Session = Depends(get_db), current_user: models.U
             raise HTTPException(400, "GRN quantities must be positive and accepted quantity cannot exceed received quantity.")
         if float(li.get("rejected_qty") or 0) < 0:
             raise HTTPException(400, "Rejected quantity cannot be negative.")
+    if not line_items:
+        recd = float(data.get("recd_qty") or 0)
+        accepted = float(data.get("accepted_qty") or 0)
+        if recd <= 0 or accepted < 0 or accepted > recd:
+            raise HTTPException(400, "GRN quantities must be positive and accepted quantity cannot exceed received quantity.")
 
     # Auto-generate GRN number server-side if not provided
     if not data.get("grn_no"):
@@ -1300,6 +1305,17 @@ def update_grn(grn_no: str, data: dict, db: Session = Depends(get_db),
 
     # ── Pull new line_items out before mutating data ───────────────────────────
     new_line_items = data.pop("line_items", None)  # list or None
+    if new_line_items is not None:
+        for li in new_line_items:
+            recd = float(li.get("recd_qty") or 0)
+            accepted = float(li.get("accepted_qty") or 0)
+            if recd <= 0 or accepted < 0 or accepted > recd:
+                raise HTTPException(400, "GRN quantities must be positive and accepted quantity cannot exceed received quantity.")
+    elif "accepted_qty" in data or "recd_qty" in data:
+        recd = float(data.get("recd_qty") or 0)
+        accepted = float(data.get("accepted_qty") or 0)
+        if recd <= 0 or accepted < 0 or accepted > recd:
+            raise HTTPException(400, "GRN quantities must be positive and accepted quantity cannot exceed received quantity.")
 
     old_store_location = grn.store_location or ""
     new_store_location = (data.get("store_location") or old_store_location).strip()
