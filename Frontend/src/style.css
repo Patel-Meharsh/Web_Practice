@@ -807,3 +807,16 @@ thead th { transition: background 0.12s, color 0.12s; }
   .auth-form-panel { padding: 24px 16px !important; }
   .auth-form-inner { max-width: 100% !important; }
 }
+
+@media (max-width: 768px) {
+  .header-search-wrap { min-width: 0; max-width: 52vw; }
+  .header-search-dropdown {
+    position: fixed !important;
+    top: 58px !important;
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    max-width: none !important;
+  }
+  .topbar-right { overflow: visible; }
+}
