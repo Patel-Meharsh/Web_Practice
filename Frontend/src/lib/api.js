@@ -13,17 +13,11 @@ const BASE =
 
 const api = axios.create({ baseURL: BASE + '/api', withCredentials: true });
 
-// Attach Bearer token on every request
-api.interceptors.request.use(cfg => {
-  return cfg
-})
-
-
 // Auto-logout on 401
 api.interceptors.response.use(
   r => r,
   err => {
-    if (err.response?.status === 401 && !err.config?.url?.endsWith('/auth/login')) {
+    if (err.response?.status === 401 && window.location.pathname !== '/login') {
       window.location.href = '/login'
     }
     return Promise.reject(err)
