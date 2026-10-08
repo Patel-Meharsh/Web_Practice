@@ -2605,7 +2605,7 @@ def login(data: dict, db: Session = Depends(get_db)):
         raise HTTPException(401, "Invalid email or password")
     if user.is_active != "true":
         raise HTTPException(403, "Account deactivated. Contact admin.")
-    user.last_login = _dt.datetime.utcnow().isoformat()
+    user.last_login = _dt.datetime.now(_dt.timezone.utc).isoformat()
     db.commit()
     token = create_token({"sub": user.id, "role": user.role, "email": user.email})
     return {"token": token, "user": _user_dict(user)}
