@@ -1,7 +1,7 @@
 from contextlib import closing
 from operator import inv
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header as FHeader, Body
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header as FHeader, Body, Request
 from fastapi.responses import StreamingResponse, FileResponse
 import os
 import uuid
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.database import get_db
 from app import models
-from app.auth import hash_password, verify_password, create_token, decode_token
+from app.auth import hash_password, verify_password, create_token, decode_token, needs_rehash
 import io
 import pandas as pd
 import openpyxl
@@ -2571,11 +2571,73 @@ def item_velocity(db: Session = Depends(get_db), current_user: models.UserModel 
 
 AVATAR_COLORS = ["#f0a500","#3b82f6","#10b981","#8b5cf6","#ef4444","#06b6d4","#f97316","#ec4899"]
 
+# Login throttling: temporary in-process protection for local/single-worker deployments.
+# Production deployments with multiple replicas should move these counters to a shared
+# store (for example Redis) or enforce equivalent limits at the API gateway.
+_LOGIN_WINDOW_SECONDS = 15 * 60
+_LOGIN_EMAIL_MAX_FAILURES = 5
+_LOGIN_IP_MAX_FAILURES = 20
+_login_failures = {}
+
+def _login_key_state(key):
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    state = _login_failures.get(key)
+    if not state or state["window_start"] + _LOGIN_WINDOW_SECONDS <= now:
+        state = {"count": 0, "window_start": now, "blocked_until": 0}
+        _login_failures[key] = state
+    return state, now
+
+def _check_login_rate_limit(email: str, client_ip: str):
+    keys = [f"email:{email}" if email else None, f"ip:{client_ip}" if client_ip else None]
+    retry_after = 0
+    for key in keys:
+        if not key:
+            continue
+        state, now = _login_key_state(key)
+        if state["blocked_until"] > now:
+            retry_after = max(retry_after, int(state["blocked_until"] - now) + 1)
+    if retry_after:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many failed login attempts. Please try again later.",
+            headers={"Retry-After": str(retry_after)},
+        )
+
+def _record_login_failure(email: str, client_ip: str):
+    now = datetime.datetime.now(datetime.timezone.utc).timestamp()
+    for key, limit in [
+        (f"email:{email}" if email else None, _LOGIN_EMAIL_MAX_FAILURES),
+        (f"ip:{client_ip}" if client_ip else None, _LOGIN_IP_MAX_FAILURES),
+    ]:
+        if not key:
+            continue
+        state, _ = _login_key_state(key)
+        state["count"] += 1
+        if state["count"] >= limit:
+            state["blocked_until"] = now + _LOGIN_WINDOW_SECONDS
+
+def _clear_login_rate_limit(email: str, client_ip: str):
+    for key in (f"email:{email}" if email else None, f"ip:{client_ip}" if client_ip else None):
+        if key:
+            _login_failures.pop(key, None)
+
+def _validate_password(password: str):
+    if not isinstance(password, str) or len(password) < 8:
+        raise HTTPException(400, "Password must be at least 8 characters.")
+    if len(password) > 128:
+        raise HTTPException(400, "Password must be 128 characters or fewer.")
+    if not any("A" <= ch <= "Z" for ch in password):
+        raise HTTPException(400, "Password must contain at least one uppercase letter.")
+    if not any(ch in "!@#$%^&*(),.?\":{}|<>" for ch in password):
+        raise HTTPException(400, "Password must contain at least one special character.")
+
+
 @router.post("/auth/signup")
 def signup(data: dict, db: Session = Depends(get_db)):
     email = (data.get("email") or "").strip().lower()
     if not email or not data.get("password") or not data.get("full_name"):
         raise HTTPException(400, "email, password and full_name are required")
+    _validate_password(data.get("password"))
     if db.query(models.UserModel).filter(models.UserModel.email == email).first():
         raise HTTPException(400, "Email already registered")
     # First user becomes super_admin automatically
@@ -2598,13 +2660,21 @@ def signup(data: dict, db: Session = Depends(get_db)):
     return {"token": token, "user": _user_dict(user)}
 
 @router.post("/auth/login")
-def login(data: dict, db: Session = Depends(get_db)):
+def login(request: Request, data: dict, db: Session = Depends(get_db)):
     email = (data.get("email") or "").strip().lower()
-    user  = db.query(models.UserModel).filter(models.UserModel.email == email).first()
-    if not user or not verify_password(data.get("password",""), user.password_hash):
+    password = data.get("password") or ""
+    client_ip = request.client.host if request.client else "unknown"
+    _check_login_rate_limit(email, client_ip)
+
+    user = db.query(models.UserModel).filter(models.UserModel.email == email).first()
+    valid = bool(user) and verify_password(password, user.password_hash)
+    if not valid or user.is_active != "true":
+        _record_login_failure(email, client_ip)
         raise HTTPException(401, "Invalid email or password")
-    if user.is_active != "true":
-        raise HTTPException(403, "Account deactivated. Contact admin.")
+
+    _clear_login_rate_limit(email, client_ip)
+    if needs_rehash(user.password_hash):
+        user.password_hash = hash_password(password)
     user.last_login = _dt.datetime.now(_dt.timezone.utc).isoformat()
     db.commit()
     token = create_token({"sub": user.id, "role": user.role, "email": user.email})
@@ -2621,6 +2691,7 @@ def update_profile(data: dict, current_user: models.UserModel = Depends(_get_cur
         if k in data:
             setattr(current_user, k, data[k])
     if data.get("new_password"):
+        _validate_password(data.get("new_password"))
         if not verify_password(data.get("current_password",""), current_user.password_hash):
             raise HTTPException(400, "Current password is incorrect")
         current_user.password_hash = hash_password(data["new_password"])
@@ -2637,10 +2708,18 @@ def update_user(user_id: int, data: dict, current_user: models.UserModel = Depen
     _require_role(current_user, "admin")
     user = db.query(models.UserModel).filter(models.UserModel.id == user_id).first()
     if not user: raise HTTPException(404)
+    if user.id == current_user.id:
+        raise HTTPException(400, "You cannot deactivate or change your own role.")
+    if user.role == "super_admin" and current_user.role != "super_admin":
+        raise HTTPException(403, "Only super admins can manage super admin accounts.")
     # Super admin can change roles; admin can only deactivate/reactivate
     if "role" in data and current_user.role == "super_admin":
+        if data["role"] not in ROLE_HIERARCHY:
+            raise HTTPException(400, "Invalid role")
         user.role = data["role"]
     if "is_active" in data:
+        if data["is_active"] not in ("true", "false"):
+            raise HTTPException(400, "is_active must be true or false")
         user.is_active = data["is_active"]
     db.commit(); db.refresh(user)
     return _user_dict(user)
@@ -2654,15 +2733,19 @@ def create_user(data: dict, current_user: models.UserModel = Depends(_get_curren
     email = (data.get("email") or "").strip().lower()
     if not email or not data.get("password") or not data.get("full_name"):
         raise HTTPException(400, "email, password and full_name are required")
+    _validate_password(data.get("password"))
     if db.query(models.UserModel).filter(models.UserModel.email == email).first():
         raise HTTPException(400, "Email already registered")
+    role = data.get("role", "observer")
+    if role not in ROLE_HIERARCHY:
+        raise HTTPException(400, "Invalid role")
     count = db.query(models.UserModel).count()
     color = AVATAR_COLORS[count % len(AVATAR_COLORS)]
     user  = models.UserModel(
         email         = email,
         full_name     = data["full_name"],
         password_hash = hash_password(data["password"]),
-        role          = data.get("role", "observer"),
+        role          = role,
         department    = data.get("department", ""),
         phone         = data.get("phone", ""),
         avatar_color  = color,
@@ -2688,8 +2771,7 @@ def reset_user_password(user_id: int, data: dict, current_user: models.UserModel
     if current_user.role != "super_admin":
         raise HTTPException(403, "Super admins only")
     new_password = (data.get("new_password") or "").strip()
-    if len(new_password) < 6:
-        raise HTTPException(400, "Password must be at least 6 characters")
+    _validate_password(new_password)
     user = db.query(models.UserModel).filter(models.UserModel.id == user_id).first()
     if not user: raise HTTPException(404, "User not found")
     if user.id == current_user.id:
