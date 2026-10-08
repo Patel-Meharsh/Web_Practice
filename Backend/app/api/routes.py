@@ -350,6 +350,7 @@ def get_location(code: str, db: Session = Depends(get_db), current_user: models.
 
 @router.put("/locations/{code}")
 def update_location(code: str, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     loc = db.query(models.LocationModel).filter(models.LocationModel.code == code).first()
     if not loc: raise HTTPException(404)
     for k, v in data.items():
@@ -358,17 +359,20 @@ def update_location(code: str, data: dict, db: Session = Depends(get_db), curren
 
 @router.post("/locations")
 def create_location(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     loc = models.LocationModel(**{k:v for k,v in data.items() if hasattr(models.LocationModel, k)})
     db.add(loc); db.commit(); db.refresh(loc); return loc
 
 @router.post("/locations/{code}/services")
 def add_service(code: str, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     _parse_dates(data, ["contract_start", "contract_end"])
     svc = models.ThirdPartyServiceModel(location_code=code, **{k:v for k,v in data.items() if hasattr(models.ThirdPartyServiceModel,k) and k!='id'})
     db.add(svc); db.commit(); db.refresh(svc); return svc
 
 @router.put("/locations/{code}/services/{svc_id}")
 def update_service(code: str, svc_id: int, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     svc = db.query(models.ThirdPartyServiceModel).filter(models.ThirdPartyServiceModel.id == svc_id).first()
     if not svc: raise HTTPException(404)
     for k, v in data.items():
@@ -382,10 +386,12 @@ def get_vendors(db: Session = Depends(get_db), current_user: models.UserModel = 
 
 @router.post("/vendors")
 def create_vendor(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     v = models.VendorModel(**data); db.add(v); db.commit(); db.refresh(v); return v
 
 @router.put("/vendors/{code}")
 def update_vendor(code: str, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     v = db.query(models.VendorModel).filter(models.VendorModel.code == code).first()
     if not v: raise HTTPException(404)
     for k, val in data.items():
@@ -401,6 +407,7 @@ def get_hk_master(category: Optional[str] = None, db: Session = Depends(get_db),
 
 @router.post("/hk-master")
 def create_hk_item(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     item = models.HKMasterModel(**{k: v for k, v in data.items() if hasattr(models.HKMasterModel, k)})
     db.add(item); db.commit(); db.refresh(item); return item
 
@@ -410,6 +417,7 @@ def get_hk_categories(db: Session = Depends(get_db), current_user: models.UserMo
 
 @router.put("/hk-master/{code}")
 def update_hk_item(code: str, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     item = db.query(models.HKMasterModel).filter(models.HKMasterModel.code == code).first()
     if not item: raise HTTPException(404)
     for k, v in data.items():
@@ -445,12 +453,14 @@ def get_items(category: Optional[str] = None, db: Session = Depends(get_db), cur
 
 @router.post("/items")
 def create_item(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     _resolve_master_group(data, db)
     item = models.ItemModel(**_clean(data, models.ItemModel))
     db.add(item); db.commit(); db.refresh(item); return item
 
 @router.put("/items/{code}")
 def update_item(code: str, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     item = db.query(models.ItemModel).filter(models.ItemModel.code == code).first()
     if not item: raise HTTPException(404)
     _resolve_master_group(data, db)
@@ -530,6 +540,7 @@ def get_consumption(db: Session = Depends(get_db), current_user: models.UserMode
 
 @router.post("/inventory")
 def create_inventory_row(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     existing = db.query(models.InventoryModel).filter_by(
         item_code=data.get("item_code"),
         location_code=data.get("location_code", "STORE-CH")
@@ -542,6 +553,7 @@ def create_inventory_row(data: dict, db: Session = Depends(get_db), current_user
 
 @router.put("/inventory/{inv_id}")
 def update_inventory_row(inv_id: int, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     row = db.query(models.InventoryModel).filter(models.InventoryModel.id == inv_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Inventory row not found")
@@ -552,6 +564,7 @@ def update_inventory_row(inv_id: int, data: dict, db: Session = Depends(get_db),
 
 @router.patch("/inventory/{inv_id}/reset")
 def reset_inventory_row(inv_id: int, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     """Reset stock_in and stock_out to zero. Row, item, location, opening_stock are untouched."""
     row = db.query(models.InventoryModel).filter(models.InventoryModel.id == inv_id).first()
     if not row:
@@ -580,6 +593,7 @@ def get_prs(status: Optional[str] = None, db: Session = Depends(get_db), current
 
 @router.post("/purchase-requisitions")
 def create_pr(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     line_items = data.pop("line_items", None) or []
     # Backward compat: populate top-level item_code/req_qty from first line item
     if line_items:
@@ -593,6 +607,7 @@ def create_pr(data: dict, db: Session = Depends(get_db), current_user: models.Us
 
 @router.put("/purchase-requisitions/{pr_no}")
 def update_pr(pr_no: str, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     pr = db.query(models.PurchaseRequisitionModel).filter(models.PurchaseRequisitionModel.pr_no == pr_no).first()
     if not pr: raise HTTPException(404)
     # Only admin+ can approve or reject (case-insensitive check)
@@ -653,6 +668,7 @@ def get_pos(status: Optional[str] = None, db: Session = Depends(get_db), current
 
 @router.post("/purchase-orders")
 def create_po(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     line_items = data.pop("line_items", None) or []
     if line_items:
         first = line_items[0]
@@ -666,6 +682,7 @@ def create_po(data: dict, db: Session = Depends(get_db), current_user: models.Us
 
 @router.put("/purchase-orders/{po_no}")
 def update_po(po_no: str, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     po = db.query(models.PurchaseOrderModel).filter(models.PurchaseOrderModel.po_no == po_no).first()
     if not po: raise HTTPException(404)
     for k, v in data.items():
@@ -1165,6 +1182,7 @@ def get_grns(db: Session = Depends(get_db), current_user: models.UserModel = Dep
 
 @router.post("/grns")
 def create_grn(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     # Extract line items before cleaning
     line_items = data.pop("line_items", []) or []
 
@@ -1257,6 +1275,7 @@ def create_grn(data: dict, db: Session = Depends(get_db), current_user: models.U
 @router.put("/grns/{grn_no}")
 def update_grn(grn_no: str, data: dict, db: Session = Depends(get_db),
                current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     grn = db.query(models.GRNModel).filter_by(grn_no=grn_no).first()
     if not grn:
         raise HTTPException(status_code=404, detail="GRN not found")
@@ -1383,6 +1402,7 @@ def get_issuances(db: Session = Depends(get_db), current_user: models.UserModel 
 
 @router.post("/issuances")
 def create_issuance(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     _parse_dates(data, ["date"])
     iss = models.IssuanceLogModel(**_clean(data, models.IssuanceLogModel))
     db.add(iss); db.flush()
@@ -1436,6 +1456,7 @@ def get_returns(db: Session = Depends(get_db), current_user: models.UserModel = 
 
 @router.post("/returns")
 def create_return(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     _parse_dates(data, ["return_date"])
     ret = models.ReturnLogModel(**_clean(data, models.ReturnLogModel))
     db.add(ret); db.flush()
@@ -1539,6 +1560,7 @@ def get_budget_calculated(db: Session = Depends(get_db), current_user: models.Us
 
 @router.post("/budget/calculate")
 def recalculate_budget(db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "analyst")
     rows, total = _compute_budget(db)
     return {"message": "Budget recalculated", "total_monthly": total, "items_count": len(rows)}
 
@@ -1959,6 +1981,7 @@ def download_template(entity: str):
 # ── PREVIEW ───────────────────────────────────────────────────────────────────
 @router.post("/import/preview")
 async def preview_import(file: UploadFile = File(...), entity: str = Form(...), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     raw = await file.read()
     try:
         df = _read_excel(raw)
@@ -2011,30 +2034,37 @@ async def _do_import(file, mapping_json, overwrite_str, db, model_class, pk_fiel
 # ── IMPORT ENDPOINTS ──────────────────────────────────────────────────────────
 @router.post("/import/hk_master")
 async def import_hk_master(file: UploadFile = File(...), mapping: str = Form(""), overwrite: str = Form("0"), db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     return await _do_import(file, mapping, overwrite, db, models.HKMasterModel, "code", ["code","name"])
 
 @router.post("/import/items")
 async def import_items(file: UploadFile = File(...), mapping: str = Form(""), overwrite: str = Form("0"), db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     return await _do_import(file, mapping, overwrite, db, models.ItemModel, "code", ["code","name"])
 
 @router.post("/import/vendors")
 async def import_vendors(file: UploadFile = File(...), mapping: str = Form(""), overwrite: str = Form("0"), db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     return await _do_import(file, mapping, overwrite, db, models.VendorModel, "code", ["code","name"])
 
 @router.post("/import/locations")
 async def import_locations(file: UploadFile = File(...), mapping: str = Form(""), overwrite: str = Form("0"), db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     return await _do_import(file, mapping, overwrite, db, models.LocationModel, "code", ["code","name"])
 
 @router.post("/import/norms")
 async def import_norms(file: UploadFile = File(...), mapping: str = Form(""), overwrite: str = Form("0"), db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     return await _do_import(file, mapping, overwrite, db, models.ConsumptionNormModel, "item_code", ["item_code"])
 
 @router.post("/import/issuances")
 async def import_issuances(file: UploadFile = File(...), mapping: str = Form(""), overwrite: str = Form("0"), db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     return await _do_import(file, mapping, overwrite, db, models.IssuanceLogModel, "issue_id", ["issue_id","item_code"], date_fields=["date"])
 
 @router.post("/import/returns")
 async def import_returns(file: UploadFile = File(...), mapping: str = Form(""), overwrite: str = Form("0"), db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     return await _do_import(file, mapping, overwrite, db, models.ReturnLogModel, "return_id", ["return_id"], date_fields=["return_date"])
 
 
