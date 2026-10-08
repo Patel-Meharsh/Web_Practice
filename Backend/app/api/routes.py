@@ -557,7 +557,11 @@ def update_inventory_row(inv_id: int, data: dict, db: Session = Depends(get_db),
     row = db.query(models.InventoryModel).filter(models.InventoryModel.id == inv_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Inventory row not found")
-    for k, v in _clean(data, models.InventoryModel).items():
+    cleaned = _clean(data, models.InventoryModel)
+    for field in ("opening_stock", "stock_in", "stock_out", "rate"):
+        if field in cleaned and float(cleaned[field] or 0) < 0:
+            raise HTTPException(400, f"{field} cannot be negative.")
+    for k, v in cleaned.items():
         setattr(row, k, v)
     db.commit(); db.refresh(row)
     return {"id": row.id}
