@@ -8,6 +8,8 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
+    // Remove legacy client-side auth tokens left by older builds.
+    localStorage.removeItem('gg_token')
     authApi.me()
       .then(u => setUser(u))
       .catch(() => setUser(null))
