@@ -107,7 +107,6 @@ export default function Admin() {
         </div>
 
         {isSuperAdmin && (
-        {/* ── DATA RESET ── */}
         <div style={{ background:'#fff1f2', border:'1.5px solid #fecdd3', borderRadius:16, padding:28 }}>
           <div style={{ display:'flex', alignItems:'flex-start', gap:14, marginBottom:20 }}>
             <div style={{ fontSize:28, flexShrink:0 }}>⚠️</div>
