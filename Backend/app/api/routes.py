@@ -1,8 +1,8 @@
 from contextlib import closing
 from operator import inv
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header as FHeader, Body, Request
-from fastapi.responses import StreamingResponse, FileResponse
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Header as FHeader, Body, Request, Cookie
+from fastapi.responses import StreamingResponse, FileResponse, Response
 import os
 import uuid
 from sqlalchemy.orm import Session
@@ -77,8 +77,8 @@ def _log(db: Session, event_type: str, entity: str, entity_id: str,
         pass          # logging must never break the main operation
 
 
-def _get_current_user(authorization: str = FHeader(default=""), db: Session = Depends(get_db)):
-    token = authorization.replace("Bearer ", "").strip()
+def _get_current_user(authorization: str = FHeader(default=""), session_cookie: str = Cookie(default=""), db: Session = Depends(get_db)):
+    token = authorization.replace("Bearer ", "").strip() or session_cookie.strip()
     payload = decode_token(token)
     if not payload:
         raise HTTPException(status_code=401, detail="Invalid or expired token")
@@ -2706,7 +2706,7 @@ def _validate_password(password: str):
 
 
 @router.post("/auth/signup")
-def signup(data: dict, db: Session = Depends(get_db)):
+def signup(data: dict, response: Response, db: Session = Depends(get_db)):
     email = (data.get("email") or "").strip().lower()
     if not email or not data.get("password") or not data.get("full_name"):
         raise HTTPException(400, "email, password and full_name are required")
@@ -2730,10 +2730,12 @@ def signup(data: dict, db: Session = Depends(get_db)):
     )
     db.add(user); db.commit(); db.refresh(user)
     token = create_token({"sub": user.id, "role": user.role, "email": user.email})
-    return {"token": token, "user": _user_dict(user)}
+    cookie_name = "__Host-gg_session" if settings.ENVIRONMENT == "production" else "gg_session"
+    response.set_cookie(cookie_name, token, httponly=True, secure=settings.ENVIRONMENT == "production", samesite="lax", max_age=60 * 60 * 24 * 7, path="/")
+    return {"user": _user_dict(user)}
 
 @router.post("/auth/login")
-def login(request: Request, data: dict, db: Session = Depends(get_db)):
+def login(request: Request, data: dict, response: Response, db: Session = Depends(get_db)):
     email = (data.get("email") or "").strip().lower()
     password = data.get("password") or ""
     client_ip = request.client.host if request.client else "unknown"
@@ -2751,7 +2753,15 @@ def login(request: Request, data: dict, db: Session = Depends(get_db)):
     user.last_login = _dt.datetime.now(_dt.timezone.utc).isoformat()
     db.commit()
     token = create_token({"sub": user.id, "role": user.role, "email": user.email})
-    return {"token": token, "user": _user_dict(user)}
+    cookie_name = "__Host-gg_session" if settings.ENVIRONMENT == "production" else "gg_session"
+    response.set_cookie(cookie_name, token, httponly=True, secure=settings.ENVIRONMENT == "production", samesite="lax", max_age=60 * 60 * 24 * 7, path="/")
+    return {"user": _user_dict(user)}
+
+@router.post("/auth/logout")
+def logout(response: Response):
+    cookie_name = "__Host-gg_session" if settings.ENVIRONMENT == "production" else "gg_session"
+    response.delete_cookie(cookie_name, path="/")
+    return {"status": "ok"}
 
 @router.get("/auth/me")
 def get_me(current_user: models.UserModel = Depends(_get_current_user)):
