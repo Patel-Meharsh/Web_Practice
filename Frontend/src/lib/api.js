@@ -25,7 +25,7 @@ api.interceptors.request.use(cfg => {
 api.interceptors.response.use(
   r => r,
   err => {
-    if (err.response?.status === 401) {
+    if (err.response?.status === 401 && !err.config?.url?.endsWith('/auth/login')) {
       localStorage.removeItem('gg_token')
       window.location.href = '/login'
     }
