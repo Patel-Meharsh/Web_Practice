@@ -1983,7 +1983,8 @@ def _safe(v):
 
 # ── TEMPLATE DOWNLOAD ─────────────────────────────────────────────────────────
 @router.get("/import/template/{entity}")
-def download_template(entity: str):
+def download_template(entity: str, current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     templates = {
         "hk_master": ["code","name","category","sub_category","uom","eco_brand","eco_price","std_brand","std_price","prem_brand","prem_price","recommended","rate","gst_pct","rol","max_stock","lead_days","status"],
         "items":     ["code","name","category","sub_category","uom","brand_tier","vendor_code","rate","gst_pct","rol","max_stock","lead_days","status"],
