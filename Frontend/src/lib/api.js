@@ -11,12 +11,10 @@ const BASE =
     ? "http://localhost:8000"
     : (import.meta.env.VITE_API_URL || "https://api.opex.vaanilabs.ai");
 
-const api = axios.create({ baseURL: BASE + '/api' });
+const api = axios.create({ baseURL: BASE + '/api', withCredentials: true });
 
 // Attach Bearer token on every request
 api.interceptors.request.use(cfg => {
-  const token = localStorage.getItem('gg_token')
-  if (token) cfg.headers.Authorization = `Bearer ${token}`
   return cfg
 })
 
@@ -26,7 +24,6 @@ api.interceptors.response.use(
   r => r,
   err => {
     if (err.response?.status === 401 && !err.config?.url?.endsWith('/auth/login')) {
-      localStorage.removeItem('gg_token')
       window.location.href = '/login'
     }
     return Promise.reject(err)
