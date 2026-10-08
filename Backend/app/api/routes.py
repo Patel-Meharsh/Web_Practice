@@ -595,6 +595,10 @@ def get_prs(status: Optional[str] = None, db: Session = Depends(get_db), current
 def create_pr(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
     _require_role(current_user, "analyst")
     line_items = data.pop("line_items", None) or []
+    if any(float(li.get("qty") or 0) <= 0 for li in line_items):
+        raise HTTPException(400, "All PR quantities must be greater than zero.")
+    if data.get("req_qty") is not None and float(data.get("req_qty") or 0) < 0:
+        raise HTTPException(400, "Request quantity cannot be negative.")
     # Backward compat: populate top-level item_code/req_qty from first line item
     if line_items:
         first = line_items[0]
@@ -670,6 +674,10 @@ def get_pos(status: Optional[str] = None, db: Session = Depends(get_db), current
 def create_po(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
     _require_role(current_user, "analyst")
     line_items = data.pop("line_items", None) or []
+    if any(float(li.get("qty") or 0) <= 0 for li in line_items):
+        raise HTTPException(400, "All PO quantities must be greater than zero.")
+    if data.get("qty_ordered") is not None and float(data.get("qty_ordered") or 0) < 0:
+        raise HTTPException(400, "Ordered quantity cannot be negative.")
     if line_items:
         first = line_items[0]
         if not data.get("item_code"): data["item_code"] = first.get("item_code", "")
@@ -685,8 +693,11 @@ def update_po(po_no: str, data: dict, db: Session = Depends(get_db), current_use
     _require_role(current_user, "analyst")
     po = db.query(models.PurchaseOrderModel).filter(models.PurchaseOrderModel.po_no == po_no).first()
     if not po: raise HTTPException(404)
+    if "status" in data:
+        _require_role(current_user, "admin")
     for k, v in data.items():
-        if hasattr(po, k) and k != "_sa_instance_state": setattr(po, k, v)
+        if hasattr(po, k) and k not in ("_sa_instance_state", "po_no"):
+            setattr(po, k, v)
     db.commit(); db.refresh(po); return po
 
 @router.post("/purchase-orders/from-pr/{pr_no}")
@@ -1185,6 +1196,13 @@ def create_grn(data: dict, db: Session = Depends(get_db), current_user: models.U
     _require_role(current_user, "analyst")
     # Extract line items before cleaning
     line_items = data.pop("line_items", []) or []
+    for li in line_items:
+        recd = float(li.get("recd_qty") or 0)
+        accepted = float(li.get("accepted_qty") or 0)
+        if recd <= 0 or accepted < 0 or accepted > recd:
+            raise HTTPException(400, "GRN quantities must be positive and accepted quantity cannot exceed received quantity.")
+        if float(li.get("rejected_qty") or 0) < 0:
+            raise HTTPException(400, "Rejected quantity cannot be negative.")
 
     # Auto-generate GRN number server-side if not provided
     if not data.get("grn_no"):
@@ -1404,11 +1422,13 @@ def get_issuances(db: Session = Depends(get_db), current_user: models.UserModel 
 def create_issuance(data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
     _require_role(current_user, "analyst")
     _parse_dates(data, ["date"])
+    qty = float(data.get("qty") or 0)
+    if qty <= 0:
+        raise HTTPException(400, "Issuance quantity must be greater than zero.")
     iss = models.IssuanceLogModel(**_clean(data, models.IssuanceLogModel))
     db.add(iss); db.flush()
 
     # ── Auto-decrement inventory stock_out ────────────────────────────────────
-    qty           = float(data.get("qty") or 0)
     item_code     = data.get("item_code", "")
     location_code = data.get("location_code", "")
     rate          = float(data.get("rate") or 0)
@@ -1463,6 +1483,8 @@ def create_return(data: dict, db: Session = Depends(get_db), current_user: model
 
     # ── If vendor return: reverse stock_in that the GRN added ────────────────
     qty_returned  = float(data.get("qty_returned") or 0)
+    if qty_returned <= 0:
+        raise HTTPException(400, "Return quantity must be greater than zero.")
     item_code     = data.get("item_code", "")
     grn_ref       = data.get("grn_ref", "")
 
@@ -1496,6 +1518,7 @@ def get_norms(db: Session = Depends(get_db), current_user: models.UserModel = De
 
 @router.put("/consumption-norms/{id}")
 def update_norm(id: int, data: dict, db: Session = Depends(get_db), current_user: models.UserModel = Depends(_get_current_user)):
+    _require_role(current_user, "admin")
     norm = db.query(models.ConsumptionNormModel).filter(models.ConsumptionNormModel.id == id).first()
     if not norm: raise HTTPException(404)
     for k, v in data.items():
